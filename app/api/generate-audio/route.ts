@@ -1,65 +1,56 @@
 import { NextResponse } from "next/server";
-import { v4 as uuid } from "uuid";
-import fs from "fs";
-import path from "path";
+
+export const runtime = "nodejs";
+
 export async function POST(req: Request) {
   try {
     const { text } = await req.json();
 
     if (!text || text.length < 3) {
-      return NextResponse.json(
-        { error: "Invalid text." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Invalid text." }, { status: 400 });
     }
 
     const apiKey = process.env.DEEPGRAM_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
-        { error: "Deepgram API key not found." },
+        { error: "Deepgram API key missing on server." },
         { status: 500 }
       );
     }
 
-    // ----- CALL DEEPGRAM TTS -----
+    // ----- CALL DEEPGRAM -----
     const response = await fetch(
       "https://api.deepgram.com/v1/speak?model=aura-asteria-en",
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Token ${apiKey}`,
+          Authorization: `Token ${apiKey}`,
         },
         body: JSON.stringify({ text }),
       }
     );
 
     if (!response.ok) {
+      const errorText = await response.text();
+      console.log("DEEPGRAM ERROR:", errorText);
       return NextResponse.json(
         { error: "Deepgram TTS failed." },
         { status: 500 }
       );
     }
 
+    // Convert audio stream → base64 to send to client
     const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    // ----- SAVE MP3 LOCALLY -----
-    const fileName = `tts-${uuid()}.mp3`;
-    const filePath = path.join(process.cwd(), "public", "audio", fileName);
-
-    // Ensure /public/audio exists
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-
-    fs.writeFileSync(filePath, buffer);
+    const base64Audio = Buffer.from(arrayBuffer).toString("base64");
 
     return NextResponse.json({
-      audioUrl: `/audio/${fileName}`,
+      audioBase64: base64Audio,
     });
-  } catch (error) {
-    console.error("TTS ERROR:", error);
+  } catch (err) {
+    console.error("TTS API ERROR:", err);
     return NextResponse.json(
-      { error: "Server error generating TTS." },
+      { error: "Server error generating audio." },
       { status: 500 }
     );
   }

@@ -22,12 +22,12 @@ import {
   RefreshCw,
   Save
 } from "lucide-react";
-import { 
-  FinalPlanScreenProps, 
-  WeekPlan, 
-  DayPlan, 
-  Exercise, 
-  Meal 
+import {
+  FinalPlanScreenProps,
+  WeekPlan,
+  DayPlan,
+  Exercise,
+  Meal
 } from '@/types/fitness';
 interface JSPDFModule {
   default: typeof import('jspdf').default;
@@ -46,6 +46,9 @@ export default function FinalPlanScreen({ data, savedPlan, isFromSavedPlans = fa
   const [loadingAudio, setLoadingAudio] = useState<{ [key: string]: boolean }>({});
   const [generatingImages, setGeneratingImages] = useState<{ [key: string]: boolean }>({});
   const [generatedImages, setGeneratedImages] = useState<{ [key: string]: string }>({});
+  const [audioCache, setAudioCache] = useState<{ [key: string]: string }>({});
+const [audioPlayer, setAudioPlayer] = useState<HTMLAudioElement | null>(null);
+
   useEffect(() => {
     // If coming from saved plans, use the saved plan directly
     if (isFromSavedPlans && savedPlan) {
@@ -289,88 +292,91 @@ export default function FinalPlanScreen({ data, savedPlan, isFromSavedPlans = fa
       setIsSaving(false);
     }
   };
-const handleListenToPlan = async (day: string, content: DayPlan) => {
-  // If same day is clicked again, toggle play/pause
-  if (currentPlayingDay === day && audioInstances[day]) {
-    if (audioInstances[day].paused) {
-      await audioInstances[day].play();
-      setCurrentPlayingDay(day);
-    } else {
-      audioInstances[day].pause();
-      setCurrentPlayingDay(null);
-    }
-    return;
-  }
-
-  // Stop any currently playing audio
-  if (currentPlayingDay && audioInstances[currentPlayingDay]) {
-    audioInstances[currentPlayingDay].pause();
-  }
-
-  // If audio already exists for this day, play it
-  if (audioInstances[day]) {
-    await audioInstances[day].play();
-    setCurrentPlayingDay(day);
-    return;
-  }
-
-  // Otherwise, fetch new audio
-  setLoadingAudio(prev => ({ ...prev, [day]: true }));
-
+  const handleListenToPlan = async (day: string, content: DayPlan) => {
   try {
-    // Use existing TTS prompts from DayPlan
-    const transcript = `${content.exercise_tts_prompt} ${content.diet_tts_prompt}`;
+    // --- If currently playing this day → PAUSE it ---
+    if (currentPlayingDay === day && audioPlayer) {
+      audioPlayer.pause();
+      setCurrentPlayingDay(null);
+      return;
+    }
 
-    // Call your TTS API
-    const audioUrl = await generateTTSAudio(transcript);
+    // --- If audio already cached → PLAY directly ---
+    if (audioCache[day]) {
+      const audio = new Audio(audioCache[day]);
+      audio.play();
+      setAudioPlayer(audio);
+      setCurrentPlayingDay(day);
+      return;
+    }
 
-    // Create audio instance
+    // --- Otherwise generate audio ---
+    setLoadingAudio(prev => ({ ...prev, [day]: true }));
+
+    const ttsText = `
+      Workout Plan:
+      ${content.exercise_tts_prompt}
+
+      Diet Plan:
+      ${content.diet_tts_prompt}
+    `;
+
+    const res = await fetch("/api/generate-audio", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: ttsText }),
+    });
+
+    const data = await res.json();
+
+    if (!data.audioBase64) {
+      throw new Error("TTS failed");
+    }
+
+    // --- Convert base64 to playable audio ---
+    const audioBlob = new Blob(
+      [Uint8Array.from(atob(data.audioBase64), c => c.charCodeAt(0))],
+      { type: "audio/mpeg" }
+    );
+    const audioUrl = URL.createObjectURL(audioBlob);
+
+    // --- Cache the audio locally ---
+    setAudioCache(prev => ({ ...prev, [day]: audioUrl }));
+
+    // --- Play it ---
     const audio = new Audio(audioUrl);
-
-    // Store audio instance
-    setAudioInstances(prev => ({ ...prev, [day]: audio }));
-
-    // Play audio
-    await audio.play();
+    audio.play();
+    setAudioPlayer(audio);
     setCurrentPlayingDay(day);
 
-    // Handle audio end
-    audio.onended = () => {
-      setCurrentPlayingDay(null);
-    };
-
-    // Handle audio errors
-    audio.onerror = () => {
-      setCurrentPlayingDay(null);
-      setLoadingAudio(prev => ({ ...prev, [day]: false }));
-    };
-
-  } catch (error) {
-    console.error('TTS Error:', error);
-    alert('Failed to generate audio. Please try again.');
+  } catch (err) {
+    console.error("TTS Error:", err);
+    alert("Failed to generate audio");
   } finally {
     setLoadingAudio(prev => ({ ...prev, [day]: false }));
   }
 };
+
   const generateTranscript = (day: string, content: DayPlan): string => {
-  return `${content.exercise_tts_prompt} ${content.diet_tts_prompt}`;
-};
-  const generateTTSAudio = async (text: string): Promise<string> => {
-    const response = await fetch('/api/generate-audio', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+    return `${content.exercise_tts_prompt} ${content.diet_tts_prompt}`;
+  };
+  const generateTTSAudio = async (text: string) => {
+    const response = await fetch("/api/generate-audio", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
     });
 
-    if (!response.ok) {
-      throw new Error('TTS generation failed');
-    }
+    const result = await response.json();
 
-    const data = await response.json();
-    return data.audioUrl; // URL to MP3 from API route
+    const audioBlob = new Blob(
+      [Uint8Array.from(atob(result.audioBase64), c => c.charCodeAt(0))],
+      { type: "audio/mpeg" }
+    );
+
+    return URL.createObjectURL(audioBlob);
   };
+
   const handleGenerateImage = async (type: 'exercise' | 'meal', name: string, day: string, identifier: string) => {
     // Create unique key for this image (day + type + name)
     const imageKey = `${day}-${type}-${identifier}`;
@@ -419,11 +425,11 @@ const handleListenToPlan = async (day: string, content: DayPlan) => {
     };
   }, []);
   useEffect(() => {
-  return () => {
-    // Clear any ongoing image generations if needed
-    setGeneratingImages({});
-  };
-}, []);
+    return () => {
+      // Clear any ongoing image generations if needed
+      setGeneratingImages({});
+    };
+  }, []);
   if (loading) return <GeneratingScreen />;
 
   if (error) {
@@ -458,7 +464,7 @@ const handleListenToPlan = async (day: string, content: DayPlan) => {
       </div>
     );
   }
-  console.log("plan: ", plan)
+  // console.log("plan: ", plan)
 
   return (
     <div className="font-sans min-h-screen bg-background py-8 px-4">
@@ -575,7 +581,7 @@ const handleListenToPlan = async (day: string, content: DayPlan) => {
 
         {/* Days Grid */}
         <div className="space-y-8">
-          {Object.entries(plan).map(([day, content]: [string,DayPlan], index) => (
+          {Object.entries(plan).map(([day, content]: [string, DayPlan], index) => (
             <motion.div
               key={day}
               initial={{ opacity: 0, y: 30 }}
@@ -795,35 +801,35 @@ const handleListenToPlan = async (day: string, content: DayPlan) => {
                               <p className="text-xl font-bold text-blue-600">{mealData.protein_g}g</p>
                               <p className="text-xs text-muted-foreground font-medium">Protein</p>
                             </div>
-                              <div className="text-center bg-white dark:bg-gray-800 rounded-xl shadow-sm flex flex-col items-center justify-center">
-                                {generatingImages[`${day}-meal-${mealData.item}`] ? (
-                                  <div className="flex flex-col items-center justify-center h-full">
-                                    <motion.div
-                                      animate={{ rotate: 360 }}
-                                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                                      className="w-6 h-6 border-2 border-green-500 border-t-transparent rounded-full mb-1"
-                                    />
-                                    <p className="text-xs text-muted-foreground">Generating...</p>
-                                  </div>
-                                ) : generatedImages[`${day}-meal-${mealData.item}`] ? (
-                                  <motion.img
-                                    initial={{ opacity: 0, scale: 0.8 }}
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    src={generatedImages[`${day}-meal-${mealData.item}`]}
-                                    alt={mealData.item}
-                                    className="w-full h-full object-cover rounded-lg"
+                            <div className="text-center bg-white dark:bg-gray-800 rounded-xl shadow-sm flex flex-col items-center justify-center">
+                              {generatingImages[`${day}-meal-${mealData.item}`] ? (
+                                <div className="flex flex-col items-center justify-center h-full">
+                                  <motion.div
+                                    animate={{ rotate: 360 }}
+                                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                                    className="w-6 h-6 border-2 border-green-500 border-t-transparent rounded-full mb-1"
                                   />
-                                ) : (
-                                  <motion.button
-                                    onClick={() => handleGenerateImage('meal', mealData.item, day, mealData.item)}
-                                    whileHover={{ scale: 1.05 }}
-                                    whileTap={{ scale: 0.95 }}
-                                    className="text-green-500 hover:text-green-600 transition-colors text-sm font-medium"
-                                  >
-                                    Get Image
-                                  </motion.button>
-                                )}
-                              </div>
+                                  <p className="text-xs text-muted-foreground">Generating...</p>
+                                </div>
+                              ) : generatedImages[`${day}-meal-${mealData.item}`] ? (
+                                <motion.img
+                                  initial={{ opacity: 0, scale: 0.8 }}
+                                  animate={{ opacity: 1, scale: 1 }}
+                                  src={generatedImages[`${day}-meal-${mealData.item}`]}
+                                  alt={mealData.item}
+                                  className="w-full h-full object-cover rounded-lg"
+                                />
+                              ) : (
+                                <motion.button
+                                  onClick={() => handleGenerateImage('meal', mealData.item, day, mealData.item)}
+                                  whileHover={{ scale: 1.05 }}
+                                  whileTap={{ scale: 0.95 }}
+                                  className="text-green-500 hover:text-green-600 transition-colors text-sm font-medium"
+                                >
+                                  Get Image
+                                </motion.button>
+                              )}
+                            </div>
                           </div>
 
                           {mealData.notes && (

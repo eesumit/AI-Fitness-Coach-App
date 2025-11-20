@@ -11,22 +11,22 @@ export default function PlanDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [savedPlan, setSavedPlan] = useState<SavedPlan | null>(null);
   
-  console.log("Plan ID from URL:", planId);
+//   console.log("Plan ID from URL:", planId);
 
   useEffect(() => {
     const loadPlanData = () => {
       if (typeof window !== 'undefined') {
         try {
           const savedPlans = localStorage.getItem('fitnessPlans');
-          console.log("Saved plans from localStorage:", savedPlans);
+        //   console.log("Saved plans from localStorage:", savedPlans);
           
           if (savedPlans) {
             const plans: SavedPlan[] = JSON.parse(savedPlans);
-            console.log("Parsed plans:", plans);
+            // console.log("Parsed plans:", plans);
             
             // Find plan by ID (not by array index)
             const foundPlan = plans.find(plan => plan.id === planId);
-            console.log("Found plan:", foundPlan);
+            // console.log("Found plan:", foundPlan);
             
             if (foundPlan) {
               setSavedPlan(foundPlan);

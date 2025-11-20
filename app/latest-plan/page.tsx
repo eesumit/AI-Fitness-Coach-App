@@ -12,15 +12,15 @@ export default function PlanDetailPage() {
       if (typeof window !== 'undefined') {
         try {
           const savedPlans = localStorage.getItem('fitnessPlans');
-          console.log("Saved plans from localStorage:", savedPlans);
+        //   console.log("Saved plans from localStorage:", savedPlans);
           
           if (savedPlans) {
             const plans: SavedPlan[] = JSON.parse(savedPlans);
-            console.log("Parsed plans:", plans);
+            // console.log("Parsed plans:", plans);
             
             // Find plan by ID (not by array index)
             const foundPlan = plans[0]
-            console.log("Found plan:", foundPlan);
+            // console.log("Found plan:", foundPlan);
             
             if (foundPlan) {
               setSavedPlan(foundPlan);
